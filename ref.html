@@ -1,0 +1,26 @@
+<html>
+    <body>
+        <a id="download">Download</a>
+        <button id="stop">Stop</button>
+        <script>
+            const handleSuccess = function (stream) {
+                const context = new AudioContext();
+                const source = context.createMediaStreamSource(stream);
+                const processor = context.createScriptProcessor(1024, 1, 1);
+
+                source.connect(processor);
+                processor.connect(context.destination);
+
+                /// CALLBACK FOR ONAUDIOPROCESS
+                processor.onaudioprocess = function (e) {
+                    // Do something with the data, e.g. convert it to WAV
+                    console.log(e.inputBuffer);
+                };
+            };
+
+            navigator.mediaDevices
+                .getUserMedia({ audio: true, video: false })
+                .then(handleSuccess);
+        </script>
+    </body>
+</html>
