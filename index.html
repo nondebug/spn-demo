@@ -5,12 +5,13 @@
 
         <style>
             canvas {
+                display: block;
                 height: 40px;
                 border: 1px solid black;
 
                 margin: 1em 0;
 
-                width: 45vw;
+                width: 40vw;
             }
 
             .columns {
@@ -40,9 +41,11 @@
 
                 <div>
                     <button id="monitor">Turn monitor <span>on</span></button>
+                    <button id="viz-toggle"><span>Pause</span> viz</button>
                 </div>
 
                 <canvas id="live-canvas"></canvas>
+                <canvas id="analyzer-vis"></canvas>
             </div>
 
             <div id="recording">
@@ -52,11 +55,14 @@
 
                 <div>
                     <button id="record"><span>Start</span> Recording</button>
+                    <span>Length: <span id="data-len">0</span></span>
                 </div>
 
                 <canvas id="recording-canvas"></canvas>
 
                 <div>
+
+                    <audio id="player" controls></audio>  
                     <a href="" id="playback"
                         ><button>playback current recording</button></a
                     >
