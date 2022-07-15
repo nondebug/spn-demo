@@ -1,6 +1,7 @@
 const AudioContext = window.AudioContext || window.webkitAudioContext;
 const context = new AudioContext();
 
+const scriptSampleRate = 256;
 const lg = async (x) => console.log(await x);
 
 let isRecording = false,
@@ -17,8 +18,9 @@ const analyserNode = new AnalyserNode(context, {
 const medianStart = new GainNode(context);
 const medianEnd = new GainNode(context);
 
-let dataArr = [],
-    currData = [];
+let dataArr = new Array(2).fill([]),
+    currData = new Array(2).fill([]);
+currData = new Array(2).fill([]);
 
 // SETUP MONITOR
 
@@ -66,7 +68,7 @@ const drawLiveVis = () => {
 
     // save buffer as data
 
-    let mode = currData.reduce((e, a) => a + e, 0) / currData.length;
+    let mode = currData[0].reduce((e, a) => a + e, 0) / currData[0].length;
 
     let loudness = mode;
 
@@ -155,8 +157,28 @@ recordButton.addEventListener("click", (e) => {
 
     if (isRecording) {
     } else {
-        document.querySelector("#data-len").innerHTML = dataArr.length;
-        player.src = URL.createObjectURL(new Blob(dataArr));
+        // Float32Array samples
+        const [left, right] = dataArr;
+
+        // interleaved
+        const interleaved = new Float32Array(left.length + right.length);
+        for (let src = 0, dst = 0; src < left.length; src++, dst += 2) {
+            interleaved[dst] = left[src];
+            interleaved[dst + 1] = right[src];
+        }
+
+        // get WAV file bytes and audio params of your audio source
+        const wavBytes = getWavBytes(interleaved.buffer, {
+            isFloat: true, // floating point or 16-bit integer
+            numChannels: 2,
+            sampleRate: 44100,
+        });
+        const wav = new Blob([wavBytes], { type: "audio/wav" });
+
+        document.querySelector("#data-len").innerHTML = dataArr[0].length;
+        player.src = URL.createObjectURL(wav, {
+            type: "audio/wav",
+        });
     }
 });
 
@@ -171,17 +193,19 @@ const processCallback = (stream) => {
 
     micSource.connect(medianStart);
 
-    const processor = context.createScriptProcessor(256, 1, 1);
+    const processor = context.createScriptProcessor(scriptSampleRate, 2, 2);
 
     processor.onaudioprocess = function (e) {
-        currData = e.inputBuffer.getChannelData(0);
+        currData[0] = e.inputBuffer.getChannelData(0);
+
+        currData[1] = e.inputBuffer.getChannelData(1);
 
         if (isRecording) {
-            dataArr.push(currData);
-
-            lg(dataArr);
+            dataArr[0].push(...currData[0]);
+            dataArr[1].push(...currData[1]);
         }
-    };
+        // Have to set output buffer to get audio afterwards
+    };;
 
     return processor;
 };
@@ -223,6 +247,7 @@ async function setupContext() {
         .connect(context.destination);
 
     // Separate out for SP. Thru SP to dest only doesn't output any audio
+    // NEVERMIND I DIDNT SET OUTPUT
     // https://github.com/WebAudio/web-audio-api/issues/345
     medianEnd
         .connect(analyserNode)
@@ -235,3 +260,69 @@ setupContext();
 context.addEventListener("statechange", (e) => {
     document.querySelector("#ctx-status").innerHTML = context.state;
 });
+
+function getWavBytes(buffer, options) {
+    const type = options.isFloat ? Float32Array : Uint16Array;
+    const numFrames = buffer.byteLength / type.BYTES_PER_ELEMENT;
+
+    const headerBytes = getWavHeader(Object.assign({}, options, { numFrames }));
+    const wavBytes = new Uint8Array(headerBytes.length + buffer.byteLength);
+
+    // prepend header, then add pcmBytes
+    wavBytes.set(headerBytes, 0);
+    wavBytes.set(new Uint8Array(buffer), headerBytes.length);
+
+    return wavBytes;
+}
+
+// adapted from https://gist.github.com/also/900023
+// returns Uint8Array of WAV header bytes
+function getWavHeader(options) {
+    const numFrames = options.numFrames;
+    const numChannels = options.numChannels || 2;
+    const sampleRate = options.sampleRate || 44100;
+    const bytesPerSample = options.isFloat ? 4 : 2;
+    const format = options.isFloat ? 3 : 1;
+
+    const blockAlign = numChannels * bytesPerSample;
+    const byteRate = sampleRate * blockAlign;
+    const dataSize = numFrames * blockAlign;
+
+    const buffer = new ArrayBuffer(44);
+    const dv = new DataView(buffer);
+
+    let p = 0;
+
+    function writeString(s) {
+        for (let i = 0; i < s.length; i++) {
+            dv.setUint8(p + i, s.charCodeAt(i));
+        }
+        p += s.length;
+    }
+
+    function writeUint32(d) {
+        dv.setUint32(p, d, true);
+        p += 4;
+    }
+
+    function writeUint16(d) {
+        dv.setUint16(p, d, true);
+        p += 2;
+    }
+
+    writeString("RIFF"); // ChunkID
+    writeUint32(dataSize + 36); // ChunkSize
+    writeString("WAVE"); // Format
+    writeString("fmt "); // Subchunk1ID
+    writeUint32(16); // Subchunk1Size
+    writeUint16(format); // AudioFormat https://i.stack.imgur.com/BuSmb.png
+    writeUint16(numChannels); // NumChannels
+    writeUint32(sampleRate); // SampleRate
+    writeUint32(byteRate); // ByteRate
+    writeUint16(blockAlign); // BlockAlign
+    writeUint16(bytesPerSample * 8); // BitsPerSample
+    writeString("data"); // Subchunk2ID
+    writeUint32(dataSize); // Subchunk2Size
+
+    return new Uint8Array(buffer);
+}
