@@ -5,17 +5,19 @@ let isRecording = false,
     isMonitoring = false,
     visualizationEnabled = true;
 
-const scriptProcessorBufferSize = 256;
-let streamSampleRate;
+const BUFFER_SIZE = 256;
 
 // TODO: Refactor as buffers
-let dataArr = new Array(2).fill([]),
-    currData = new Array(2).fill([]);
+let recordingBuffer,
+    streamSampleRate,
+    currData = new Array(2).fill([]),
+    recordLength = 0;
 
 const ls = async (x) => console.log(await x);
 
 document.addEventListener("DOMContentLoaded", init);
 
+// TODO comment as necessary
 async function init() {
     if (context.state === "suspended") {
         context.resume();
@@ -34,6 +36,13 @@ async function init() {
     const micStream = await setupMic(medianStart);
     streamSampleRate = await micStream.getAudioTracks()[0].getSettings()
         .sampleRate;
+
+    recordingBuffer = context.createBuffer(
+        2,
+        streamSampleRate * 5,
+        streamSampleRate,
+    );
+
     const spNode = setupScriptProcessor(micStream, medianStart);
 
     ls(streamSampleRate);
@@ -72,22 +81,20 @@ function setupScriptProcessor(stream, attachNode) {
 
     micSource.connect(attachNode);
 
-    const processor = context.createScriptProcessor(scriptProcessorBufferSize);
+    const processor = context.createScriptProcessor(BUFFER_SIZE);
 
     // Callback for ScriptProcessorNode.
     processor.onaudioprocess = function (e) {
         // Just pushes data to dataArr and currData
-        // for (let i = 0; i < currData.length; i++) {
-        //     currData[i] = e.inputBuffer.getChannelData(i);
-        //     dataArr[i].push(...currData[i]);
-        // }
+        for (let i = 0; i < currData.length; i++) {
+            currData[i] = e.inputBuffer.getChannelData(i);
 
-        currData[0] = e.inputBuffer.getChannelData(0);
-        currData[1] = e.inputBuffer.getChannelData(1);
+            if (isRecording)
+                recordingBuffer.copyToChannel(currData[i], i, recordLength);
+        }
 
         if (isRecording) {
-            dataArr[0].push(...currData[0]);
-            dataArr[1].push(...currData[1]);
+            recordLength += BUFFER_SIZE;
         }
     };
 
@@ -151,7 +158,7 @@ function setupRecording() {
         // Call
         if (!isRecording) {
             const wavUrl = getWavFromData();
-            document.querySelector("#data-len").innerHTML = dataArr[0].length;
+            document.querySelector("#data-len").innerHTML = recordLength;
             // Update player and download file src
             player.src = wavUrl;
             downloadButton.src = wavUrl;
@@ -230,10 +237,13 @@ function getWavFromData() {
         writeUint32(dataSize); // Subchunk2Size
 
         return new Uint8Array(buffer);
-    };;
+    };
 
     // Get sample array from dataArr
-    const [left, right] = dataArr;
+    const [left, right] = [
+        recordingBuffer.getChannelData(0),
+        recordingBuffer.getChannelData(1),
+    ];
 
     // Interleave audio into a 1d stream
     const interleaved = new Float32Array(left.length + right.length);
@@ -248,6 +258,7 @@ function getWavFromData() {
         numChannels: 2,
         sampleRate: streamSampleRate,
     });
+
     const wavBlob = new Blob([wavBytes], { type: "audio/wav" }),
         wavUrl = URL.createObjectURL(wavBlob, {
             type: "audio/wav",
