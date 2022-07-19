@@ -25,7 +25,11 @@ async function init() {
 
     // Create intermediary nodes
     // TODO remove medians?
-    const analyserNode = await new AnalyserNode(context, {
+    const liveAnalyserNode = await new AnalyserNode(context, {
+        fftSize: 128,
+    });
+
+    const recordingAnalyserNode = await new AnalyserNode(context, {
         fftSize: 128,
     });
     const monitorNode = context.createGain();
@@ -50,21 +54,19 @@ async function init() {
     // Setup components
     setupMonitor(monitorNode);
     setupRecording();
-    setupVisualizers(analyserNode);
+    setupVisualizers(liveAnalyserNode);
 
     // Mic to proces
     medianStart
         .connect(medianEnd)
+        .connect(liveAnalyserNode)
         .connect(monitorNode)
         .connect(context.destination);
 
     // Separate out for SP. Thru SP to dest only doesn't output any audio
     // NEVERMIND I DIDNT SET OUTPUT
     // https://github.com/WebAudio/web-audio-api/issues/345
-    medianEnd
-        .connect(analyserNode)
-        .connect(spNode)
-        .connect(context.destination);
+    medianEnd.connect(spNode).connect(context.destination);
 
     // Watch Context Status
 
@@ -158,6 +160,8 @@ function setupRecording() {
         // Call
         if (!isRecording) {
             const wavUrl = getWavFromData();
+            drawRecordingVis();
+
             document.querySelector("#data-len").innerHTML = recordLength;
             // Update player and download file src
             player.src = wavUrl;
@@ -270,7 +274,7 @@ function getWavFromData() {
 /** Setup all visualizers.  */
 function setupVisualizers(analyserNode) {
     setupGainVis();
-    setupAnalyserVis(analyserNode);
+    setupLiveAnalyserVis(analyserNode);
 
     const visToggle = document.querySelector("#viz-toggle");
     visToggle.addEventListener("click", (e) => {
@@ -329,7 +333,7 @@ const setupGainVis = () => {
 /**
  * Analyser Frequency Visualizer
  */
-function setupAnalyserVis(analyserNode) {
+function setupLiveAnalyserVis(analyserNode) {
     const canvas = document.querySelector("#analyzer-vis"),
         canvasContext = canvas.getContext("2d");
 
@@ -364,3 +368,52 @@ function setupAnalyserVis(analyserNode) {
 
     draw();
 }
+
+const drawRecordingVis = () => {
+    const canvas = document.querySelector("#recording-canvas");
+    const bufferLength = recordLength;
+
+    const width = canvas.width,
+        height = canvas.height;
+
+    const canvasContext = canvas.getContext("2d");
+
+    const channelData = recordingBuffer.getChannelData(0);
+
+    // save buffer as data
+    let currX = 0;
+
+    const draw = (loudness, offset) => {
+        let centerY = ((1 - loudness) * height) / 2;
+
+        canvasContext.fillStyle = "red";
+        canvasContext.fillRect(currX, centerY, 1, 1);
+
+        canvasContext.fillStyle = "black";
+        canvasContext.fillRect(currX, centerY, 1, loudness * height);
+
+        if (currX < width - 1) {
+            currX++;
+        } else {
+            currX = 0;
+        }
+
+        canvasContext.fillStyle = "rgba(255,255,255,.8)";
+        canvasContext.fillRect(currX + 1, 0, 1, height);
+        canvasContext.fillStyle = "black";
+        canvasContext.fillRect(currX - 1, centerY, 1, 1);
+
+        requestAnimationFrame(draw);
+    };
+
+    for (let i = 0; i < bufferLength; i += BUFFER_SIZE) {
+        let loudness = 0;
+
+        for (let j = i; j < i + BUFFER_SIZE; j++) loudness += channelData[0];
+
+        loudness /= BUFFER_SIZE;
+
+        draw(loudness, i);
+    }
+    // draw();
+};
