@@ -106,12 +106,8 @@ function setupScriptProcessor(stream, attachNode) {
 async function setupMic() {
     // Triggered when mic is selected
 
-    const at20 =
-        "7c142e20af72ddc0bb42359c74b7693031ac4cf27870749f0f53553d15fd6c8f";
-
     return await navigator.mediaDevices.getUserMedia({
         audio: {
-            deviceId: at20,
             echoCancellation: false,
             autoGainControl: false,
             noiseSuppression: false,
